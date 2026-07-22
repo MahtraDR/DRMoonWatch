@@ -42,7 +42,7 @@
   }
   .disc {
     width: 64px; height: 64px; border-radius: 50%; flex: 0 0 64px;
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,.08), 0 0 18px rgba(120,110,180,.25);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.22), 0 0 18px rgba(120,110,180,.25);
     align-self: center;
   }
   .moon .name { font-size: 18px; font-weight: 600; }
@@ -78,22 +78,16 @@
     <svg viewBox="0 0 100 44" preserveAspectRatio="xMidYMid meet" role="img" aria-label="The moons and sun on their arcs across the horizon">
       <defs>
         <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#080a18"/>
-          <stop offset="1" stop-color="#1b2046"/>
+          <stop offset="0" stop-color="#6bbcff"/>
+          <stop offset="1" stop-color="#90D5FF"/>
         </linearGradient>
       </defs>
       <rect x="0" y="0" width="100" height="30" fill="url(#skyGrad)"/>
-      <g fill="#dfe4ff" opacity="0.55">
-        <circle cx="9" cy="6" r="0.28"/><circle cx="21" cy="12" r="0.22"/><circle cx="33" cy="5" r="0.3"/>
-        <circle cx="46" cy="9" r="0.2"/><circle cx="58" cy="4" r="0.26"/><circle cx="69" cy="11" r="0.24"/>
-        <circle cx="80" cy="6" r="0.3"/><circle cx="90" cy="13" r="0.22"/><circle cx="15" cy="20" r="0.2"/>
-        <circle cx="86" cy="22" r="0.2"/><circle cx="63" cy="18" r="0.2"/><circle cx="40" cy="23" r="0.18"/>
-      </g>
-      <path d="M6 30 A44 24 0 0 1 94 30" fill="none" stroke="#3c4488" stroke-width="0.4" stroke-dasharray="1.4 1.6" opacity="0.75"/>
+      <path d="M6 30 A44 24 0 0 1 94 30" fill="none" stroke="#3f6ea8" stroke-width="0.4" stroke-dasharray="1.4 1.6" opacity="0.6"/>
       <rect x="0" y="30" width="100" height="14" fill="#0b0d1e"/>
-      <line x1="0" y1="30" x2="100" y2="30" stroke="#4b5088" stroke-width="0.5"/>
-      <text x="1.5" y="28.6" font-size="2.4" fill="#6b7099">E</text>
-      <text x="95.5" y="28.6" font-size="2.4" fill="#6b7099">W</text>
+      <line x1="0" y1="30" x2="100" y2="30" stroke="#2f5a7a" stroke-width="0.5"/>
+      <text x="1.5" y="28.6" font-size="2.4" fill="#2b3a5c">E</text>
+      <text x="95.5" y="28.6" font-size="2.4" fill="#2b3a5c">W</text>
       <g id="sky-bodies"></g>
     </svg>
   </div>
@@ -274,9 +268,18 @@ function fmt(sec) {
 }
 function pad2(n) { return (n < 10 ? "0" : "") + n; }
 
+// Multiply a #rrggbb colour toward black (f in 0..1) for the shadowed lunar side.
+function darken(hex, f) {
+  var n = parseInt(hex.slice(1), 16);
+  var r = Math.round(((n >> 16) & 255) * f);
+  var g = Math.round(((n >> 8) & 255) * f);
+  var b = Math.round((n & 255) * f);
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
 var FRAC = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.5, 0.25];
-function discStyle(idx) {
-  var dark = "#141426", light = "#e9e9f2";
+function discStyle(idx, color) {
+  var dark = darken(color, 0.4), light = color;
   if (idx === 0) return dark;
   if (idx === 4) return light;
   var pct = Math.round((1 - FRAC[idx]) * 100);
@@ -285,13 +288,14 @@ function discStyle(idx) {
 }
 
 // ---- Sky scene -------------------------------------------------------------
-var MOON_COLOUR = { katamba: "#cbb6ff", xibar: "#9fc4e8", yavash: "#f0917f" };
+// True moon colours: Katamba the black moon, Xibar the blue, Yavash the red.
+var MOON_COLOUR = { katamba: "#252525", xibar: "#0F52BA", yavash: "#B22222" };
 
 // A moon disc for the sky at the origin, radius r, drawn with its phase as a
-// curved-terminator lune (dark base + lit region + rim). Waxing is lit on the
-// right, waning on the left.
-function moonDiscSVG(idx, r) {
-  var dark = "#141426", light = "#e9e9f2", rim = "rgba(200,205,235,.55)";
+// curved-terminator lune (shadowed side + lit side in the moon's colour + rim).
+// Waxing is lit on the right, waning on the left.
+function moonDiscSVG(idx, r, color) {
+  var dark = darken(color, 0.4), light = color, rim = "rgba(20,28,54,.55)";
   if (idx === 0) return '<circle r="' + r + '" fill="' + dark + '" stroke="' + rim + '" stroke-width="0.4"/>';
   if (idx === 4) return '<circle r="' + r + '" fill="' + light + '"/>';
   var p = (1 - Math.cos(idx * Math.PI / 4)) / 2;   // illuminated fraction
@@ -337,8 +341,9 @@ function renderSky(now) {
     var x = cx - arcRx * Math.cos(theta), y = hor - ry * Math.sin(theta);
     var idx = phaseAt(m, ti).index;
     out += '<g transform="translate(' + x.toFixed(2) + ' ' + y.toFixed(2) + ')" opacity="' + (up ? 1 : 0.4) + '">' +
-           moonDiscSVG(idx, mr) +
-           '<text x="0" y="' + (mr + 3.2) + '" text-anchor="middle" font-size="2.4" fill="' + MOON_COLOUR[m] + '">' + c.label + '</text>' +
+           moonDiscSVG(idx, mr, MOON_COLOUR[m]) +
+           '<text x="0" y="' + (mr + 3.2) + '" text-anchor="middle" font-size="2.4" fill="' + MOON_COLOUR[m] +
+           '" stroke="rgba(255,255,255,0.85)" stroke-width="0.5" style="paint-order:stroke">' + c.label + '</text>' +
            '</g>';
   });
 
@@ -408,7 +413,7 @@ function render() {
     var pos = moonPos(m, now);
     var ph = phaseAt(m, ti);
     var np = nextPhase(m, ti);
-    document.getElementById("disc-" + m).style.background = discStyle(ph.index);
+    document.getElementById("disc-" + m).style.background = discStyle(ph.index, MOON_COLOUR[m]);
     document.getElementById("phase-" + m).textContent = ph.name;
     var hz = document.getElementById("horizon-" + m);
     hz.textContent = pos.visible ? "above" : "below";
