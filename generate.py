@@ -1,0 +1,420 @@
+#!/usr/bin/env python3
+"""
+Generate a fully self-contained index.html for the DragonRealms moon dashboard.
+
+Reads the validated constants out of moonwatch.lic (sun lookup tables, name
+arrays) so they are byte-accurate, and emits a single static page that computes
+moons, sun, and the Elanthian calendar entirely in the browser from the wall
+clock. No server, no network, no npm, no build. Run once; ship index.html.
+
+Usage: python3 generate.py [path-to-moonwatch.lic]
+"""
+import json
+import re
+import sys
+
+LIC = sys.argv[1] if len(sys.argv) > 1 else \
+    "/Users/grocha/angua/lich-5-mine/scripts/custom/moonwatch.lic"
+
+TEMPLATE = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elanthian Moons</title>
+<style>
+  :root {
+    --bg: #0b0d1a; --panel: #151830; --panel2: #1d2142;
+    --ink: #e9e9f2; --dim: #9aa0c0; --accent: #b9a6ff;
+    --up: #7ee0a5; --down: #5a6088;
+    --katamba: #cbb6ff; --xibar: #9fc4e8; --yavash: #f0917f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background:
+      radial-gradient(1200px 600px at 70% -10%, #1a1f45 0%, transparent 60%),
+      var(--bg);
+    color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height: 100vh; padding: 24px;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  h1 { font-weight: 600; font-size: 26px; margin: 0 0 4px; letter-spacing: .5px; }
+  .sub { color: var(--dim); margin-bottom: 20px; font-size: 13px; }
+  .bar {
+    display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 22px;
+  }
+  .chip {
+    background: var(--panel); border: 1px solid #262b52; border-radius: 12px;
+    padding: 12px 16px; flex: 1 1 200px;
+  }
+  .chip .k { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+  .chip .v { font-size: 18px; margin-top: 2px; }
+  .chip .v small { color: var(--dim); font-size: 13px; }
+  .moons { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  .moon {
+    background: linear-gradient(180deg, var(--panel2), var(--panel));
+    border: 1px solid #2a2f5a; border-radius: 16px; padding: 18px; display: flex; gap: 16px;
+  }
+  .disc {
+    width: 64px; height: 64px; border-radius: 50%; flex: 0 0 64px;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.08), 0 0 18px rgba(120,110,180,.25);
+    align-self: center;
+  }
+  .moon .name { font-size: 18px; font-weight: 600; }
+  .moon .phase { color: var(--accent); margin: 2px 0 8px; }
+  .moon .row { display: flex; justify-content: space-between; font-size: 13px; padding: 2px 0; }
+  .moon .row .lbl { color: var(--dim); }
+  .status-up { color: var(--up); font-weight: 600; }
+  .status-down { color: var(--down); font-weight: 600; }
+  .kat .name { color: var(--katamba); }
+  .xib .name { color: var(--xibar); }
+  .yav .name { color: var(--yavash); }
+  .section-title { margin: 26px 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
+  .conj { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .conj .card { background: var(--panel); border: 1px solid #262b52; border-radius: 12px; padding: 14px 16px; }
+  .conj .big { font-size: 20px; margin-top: 4px; }
+  .foot { margin-top: 30px; color: var(--dim); font-size: 12px; line-height: 1.6; border-top: 1px solid #222750; padding-top: 14px; }
+  code { background: #11142a; padding: 1px 5px; border-radius: 4px; color: #c8cdf5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Elanthian Moons</h1>
+  <div class="sub">Katamba, Xibar and Yavash - computed live in your browser from the wall clock. No server, offline-capable.</div>
+
+  <div class="bar">
+    <div class="chip"><div class="k">Elanthian date</div><div class="v" id="cal-date">-</div></div>
+    <div class="chip"><div class="k">Hour / season</div><div class="v" id="cal-hour">-</div></div>
+    <div class="chip"><div class="k">Sun</div><div class="v" id="sun">-</div></div>
+  </div>
+
+  <div class="moons" id="moons"></div>
+
+  <div class="section-title">Conjunctions</div>
+  <div class="conj">
+    <div class="card"><div class="k" style="color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.08em">All three above the horizon</div><div class="big" id="allup">-</div></div>
+    <div class="card"><div class="k" style="color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.08em">All three below the horizon</div><div class="big" id="alldown">-</div></div>
+  </div>
+
+  <div class="foot" id="foot"></div>
+</div>
+
+<script>
+"use strict";
+
+// ============================================================================
+// Constants - ported verbatim from moonwatch.lic (validated). Sun tables and
+// name arrays are injected byte-for-byte by generate.py.
+// ============================================================================
+var MOONS = {
+  katamba: { epoch: 1771558850, cycle: 21088.611, visible: 10602, sidereal: 14847, label: "Katamba", cls: "kat" },
+  xibar:   { epoch: 1771560044, cycle: 20848.143, visible: 10482, sidereal: 9983,  label: "Xibar",   cls: "xib" },
+  yavash:  { epoch: 1771555118, cycle: 21129.564, visible: 10624, sidereal: 16171, label: "Yavash",  cls: "yav" }
+};
+var MOON_ORDER = ["katamba", "xibar", "yavash"];
+var PHASE_NAMES = ["new", "waxing crescent", "first quarter", "waxing gibbous", "full", "waning gibbous", "third quarter", "waning crescent"];
+var PHASE_SKEW_ROIS = 80895;      // 4,853,700 / 60
+var DPY = 400;
+
+// Calendar
+var CAL_EPOCH = 1688607948, CAL_YEAR = 446;
+var SEC_ROIS = 60, SEC_ANLAS = 1800, SEC_DAY = 21600, DAYS_MONTH = 40;
+var ANLAS_NAMES = /*ANLAS_NAMES*/;
+var MONTH_NAMES = /*MONTH_NAMES*/;   // index 0 is null (months are 1-based)
+var YEAR_NAMES  = /*YEAR_NAMES*/;    // index 0 is null (cycle is 1-7)
+
+// Sun empirical lookup tables (rois per day-of-year, 0-399)
+var SUN_RISE = /*SUN_RISE*/;
+var SUN_SET  = /*SUN_SET*/;
+
+// ============================================================================
+// Model
+// ============================================================================
+function imod(a, n) { return ((a % n) + n) % n; }
+
+function calcDate(t) {
+  var total = t - CAL_EPOCH;
+  var SPY = SEC_DAY * DPY;                 // 8,640,000
+  var years = Math.floor(total / SPY);
+  var rem = imod(total, SPY);
+  var doy = Math.floor(rem / SEC_DAY);     // 0-399
+  var sid = imod(rem, SEC_DAY);            // 0-21599
+  return {
+    year: CAL_YEAR + years,
+    month: Math.floor(doy / DAYS_MONTH) + 1,
+    day: (doy % DAYS_MONTH) + 1,
+    doy: doy,
+    anlas: Math.floor(sid / SEC_ANLAS),
+    rois: Math.floor((sid % SEC_ANLAS) / SEC_ROIS),
+    sid: sid
+  };
+}
+
+function yearName(y) { var c = y % 7; if (c === 0) c = 7; return YEAR_NAMES[c]; }
+function sunTimes(doy) { return { rise: SUN_RISE[doy] * 60, set: SUN_SET[doy] * 60 }; }
+
+function season(doy) {
+  if (doy < 50) return "winter";
+  if (doy < 150) return "spring";
+  if (doy < 250) return "summer";
+  if (doy < 350) return "fall";
+  return "winter";
+}
+
+function timeOfDay(sid, doy) {
+  var s = sunTimes(doy), rise = s.rise, set = s.set;
+  var day = set - rise, night = SEC_DAY - day;
+  if (sid < rise - night / 8) return "night";
+  if (sid < rise) return "approaching sunrise";
+  if (sid < rise + night / 8) return "dawn";
+  if (sid < 10800 - day / 4) return "early morning";
+  if (sid < 10800 - day / 8) return "mid-morning";
+  if (sid < 10800) return "late morning";
+  if (sid < 10800 + day / 8) return "midday";
+  if (sid < 10800 + day / 4) return "early afternoon";
+  if (sid < set - day / 8) return "mid-afternoon";
+  if (sid < set - day / 9) return "late afternoon";
+  if (sid < set) return "dusk";
+  if (sid < set + night / 9) return "sunset";
+  if (sid < SEC_DAY - night / 4) return "early evening";
+  if (sid < SEC_DAY - night / 8) return "evening";
+  return "late evening";
+}
+
+function sunPosition(t) {
+  var d = calcDate(t), s = sunTimes(d.doy), sid = d.sid;
+  if (sid >= s.rise && sid < s.set) return { visible: true, seconds: s.set - sid, event: "set" };
+  if (sid < s.rise) return { visible: false, seconds: s.rise - sid, event: "rise" };
+  var tmr = sunTimes((d.doy + 1) % DPY);
+  return { visible: false, seconds: (SEC_DAY - sid) + tmr.rise, event: "rise" };
+}
+
+function nearestTick(x) { return Math.floor((x + 30) / 60) * 60; }
+
+function moonPos(m, t) {
+  var c = MOONS[m], el = t - c.epoch;
+  var n = Math.floor(el / c.cycle), pos = imod(el, c.cycle);
+  if (pos < c.visible) {
+    var set = nearestTick(c.epoch + n * c.cycle + c.visible);
+    return { visible: true, seconds: Math.max(set - t, 0), event: "set" };
+  }
+  var rise = nearestTick(c.epoch + (n + 1) * c.cycle);
+  return { visible: false, seconds: Math.max(rise - t, 0), event: "rise" };
+}
+
+function upAt(m, t) { var c = MOONS[m]; return imod(t - c.epoch, c.cycle) < c.visible; }
+
+function phaseAt(m, t) {
+  var P = MOONS[m].sidereal, um = Math.floor(t / 60);
+  var orb = Math.floor(imod(um, P) * 360 / P);
+  var doy = imod(Math.floor((um + PHASE_SKEW_ROIS) / 360), DPY);
+  var pa = imod(orb + Math.floor(doy * 360 / DPY), 360);
+  var idx = imod(Math.floor(pa * 8 / 360), 8);
+  return { index: idx, name: PHASE_NAMES[idx], angle: pa };
+}
+
+function nextPhase(m, t) {
+  var p = phaseAt(m, t), P = MOONS[m].sidereal;
+  var rate = (360 / P) + ((360 / DPY) / 360);        // degrees per roisaen
+  var secs = Math.round((45 - (p.angle % 45)) / rate * 60);
+  return { name: PHASE_NAMES[(p.index + 1) % 8], seconds: secs };
+}
+
+// Forward scans (minute resolution). Return absolute unix time, or null.
+function nextPhaseIndexTime(m, t, target, horizonDays) {
+  var H = (horizonDays || 25) * 24 * 60;
+  for (var i = 0; i < H; i++) { if (phaseAt(m, t + i * 60).index === target) return t + i * 60; }
+  return null;
+}
+
+function conjunction(t, wantUp, horizonDays) {
+  var H = (horizonDays || 30) * 24 * 60;
+  function cond(tt) {
+    for (var k = 0; k < MOON_ORDER.length; k++) {
+      var u = upAt(MOON_ORDER[k], tt);
+      if (wantUp && !u) return false;
+      if (!wantUp && u) return false;
+    }
+    return true;
+  }
+  for (var i = 0; i < H; i++) {
+    var tt = t + i * 60;
+    if (cond(tt)) {
+      var j = i;
+      while (j < H && cond(t + j * 60)) j++;
+      return { start: t + i * 60, end: t + j * 60 };
+    }
+  }
+  return null;
+}
+
+// ============================================================================
+// Formatting + rendering
+// ============================================================================
+function fmt(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  var d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600),
+      m = Math.floor((sec % 3600) / 60), s = sec % 60, o = "";
+  if (d) o += d + "d ";
+  if (d || h) o += h + "h ";
+  o += m + "m " + s + "s";
+  return o;
+}
+function pad2(n) { return (n < 10 ? "0" : "") + n; }
+
+var FRAC = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.5, 0.25];
+function discStyle(idx) {
+  var dark = "#141426", light = "#e9e9f2";
+  if (idx === 0) return dark;
+  if (idx === 4) return light;
+  var pct = Math.round((1 - FRAC[idx]) * 100);
+  var dir = (idx >= 1 && idx <= 3) ? "to right" : "to left"; // waxing lit on right
+  return "linear-gradient(" + dir + ", " + dark + " " + pct + "%, " + light + " " + pct + "%)";
+}
+
+// Cache the expensive forward-scan targets; refresh periodically.
+var targets = null, targetsAt = 0;
+function refreshTargets() {
+  var t = Math.floor(Date.now() / 1000);
+  targets = { full: {} };
+  for (var k = 0; k < MOON_ORDER.length; k++) {
+    targets.full[MOON_ORDER[k]] = nextPhaseIndexTime(MOON_ORDER[k], t, 4, 25);
+  }
+  targets.allup = conjunction(t, true, 30);
+  targets.alldown = conjunction(t, false, 30);
+  targetsAt = t;
+}
+
+function buildMoonCards() {
+  var host = document.getElementById("moons");
+  host.innerHTML = "";
+  MOON_ORDER.forEach(function (m) {
+    var c = MOONS[m];
+    var el = document.createElement("div");
+    el.className = "moon " + c.cls;
+    el.innerHTML =
+      '<div class="disc" id="disc-' + m + '"></div>' +
+      '<div style="flex:1">' +
+        '<div class="name">' + c.label + '</div>' +
+        '<div class="phase" id="phase-' + m + '">-</div>' +
+        '<div class="row"><span class="lbl">Horizon</span><span id="horizon-' + m + '">-</span></div>' +
+        '<div class="row"><span class="lbl" id="evlbl-' + m + '">Next event</span><span id="event-' + m + '">-</span></div>' +
+        '<div class="row"><span class="lbl">Next phase</span><span id="np-' + m + '">-</span></div>' +
+        '<div class="row"><span class="lbl">Next full</span><span id="full-' + m + '">-</span></div>' +
+      '</div>';
+    host.appendChild(el);
+  });
+}
+
+function render() {
+  var now = Date.now() / 1000;
+  var ti = Math.floor(now);
+
+  // Refresh cached scans every 30s or when a target has passed.
+  if (!targets || (ti - targetsAt) > 30 ||
+      (targets.allup && ti > targets.allup.end) ||
+      (targets.alldown && ti > targets.alldown.end)) {
+    refreshTargets();
+  }
+
+  var d = calcDate(ti);
+  document.getElementById("cal-date").innerHTML =
+    d.year + "-" + pad2(d.month) + "-" + pad2(d.day) +
+    " <small>" + (MONTH_NAMES[d.month] || "") + "</small>";
+  document.getElementById("cal-hour").innerHTML =
+    pad2(d.anlas) + ":" + pad2(d.rois) + " <small>" + ANLAS_NAMES[d.anlas] + "</small><br>" +
+    "<small>" + season(d.doy) + " &middot; " + yearName(d.year) + "</small>";
+
+  var sun = sunPosition(ti);
+  var tod = timeOfDay(d.sid, d.doy);
+  document.getElementById("sun").innerHTML =
+    (sun.visible ? "up" : "down") + " <small>(" + tod + ")</small><br>" +
+    "<small>" + (sun.event === "set" ? "sets" : "rises") + " in " + fmt(sun.seconds) + "</small>";
+
+  MOON_ORDER.forEach(function (m) {
+    var pos = moonPos(m, now);
+    var ph = phaseAt(m, ti);
+    var np = nextPhase(m, ti);
+    document.getElementById("disc-" + m).style.background = discStyle(ph.index);
+    document.getElementById("phase-" + m).textContent = ph.name;
+    var hz = document.getElementById("horizon-" + m);
+    hz.textContent = pos.visible ? "above" : "below";
+    hz.className = pos.visible ? "status-up" : "status-down";
+    document.getElementById("evlbl-" + m).textContent = pos.visible ? "Sets in" : "Rises in";
+    document.getElementById("event-" + m).textContent = fmt(pos.seconds);
+    document.getElementById("np-" + m).textContent = np.name + " in " + fmt(np.seconds);
+    var ft = targets.full[m];
+    document.getElementById("full-" + m).textContent =
+      (ph.index === 4) ? "now" : (ft == null ? "-" : fmt(ft - ti));
+  });
+
+  function conjText(c) {
+    if (!c) return "none within 30 days";
+    if (c.start <= ti) return "now, ends in " + fmt(c.end - ti);
+    return "in " + fmt(c.start - ti) + " (lasts " + fmt(c.end - c.start) + ")";
+  }
+  document.getElementById("allup").textContent = conjText(targets.allup);
+  document.getElementById("alldown").textContent = conjText(targets.alldown);
+}
+
+document.getElementById("foot").innerHTML =
+  "Deterministic from the Elanthian clock: moon periods are the game developers' sidereal orbits " +
+  "(cross-validated to under a second), phases and sun times from validated tables. " +
+  "Everything is computed in your browser - no server, no network, no tracking. " +
+  "Phase is a model value (no per-character calibration); timers are quantized to the 60s server tick.";
+
+buildMoonCards();
+render();
+setInterval(render, 1000);
+</script>
+</body>
+</html>
+'''
+
+
+def _body(name):
+    m = re.search(name + r"\s*=\s*\[(.*?)\]\.freeze", src, re.S)
+    if not m:
+        raise SystemExit("could not find " + name)
+    return m.group(1)
+
+
+def arr_ints(name):
+    return [int(x) for x in re.findall(r"-?\d+", re.sub(r"#.*", "", _body(name)))]
+
+
+def arr_strs(name):
+    out = []
+    for mm in re.finditer(r"nil|'([^']*)'|\"([^\"]*)\"", _body(name)):
+        if mm.group(0) == "nil":
+            out.append(None)
+        else:
+            out.append(mm.group(1) if mm.group(1) is not None else mm.group(2))
+    return out
+
+
+src = open(LIC, encoding="utf-8").read()
+rise = arr_ints("SUN_RISE_ROIS_TABLE")
+sset = arr_ints("SUN_SET_ROIS_TABLE")
+anlas = arr_strs("ANLAS_NAMES")
+months = arr_strs("MONTH_NAMES")
+years = arr_strs("YEAR_NAMES")
+
+assert len(rise) == 400 and len(sset) == 400, "sun tables must be 400 entries"
+assert len(anlas) == 12 and len(months) == 11 and len(years) == 8
+
+repl = {
+    "/*SUN_RISE*/": json.dumps(rise),
+    "/*SUN_SET*/": json.dumps(sset),
+    "/*ANLAS_NAMES*/": json.dumps(anlas),
+    "/*MONTH_NAMES*/": json.dumps(months),
+    "/*YEAR_NAMES*/": json.dumps(years),
+}
+
+html = TEMPLATE
+for k, v in repl.items():
+    html = html.replace(k, v)
+
+open("index.html", "w", encoding="utf-8").write(html)
+print("wrote index.html (%d bytes)" % len(html))
