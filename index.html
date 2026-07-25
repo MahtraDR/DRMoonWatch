@@ -364,14 +364,14 @@ function renderSky(now) {
     else { theta = Math.PI + ((pos - c.visible) / (c.cycle - c.visible)) * Math.PI; ry = ryDn; }
     var x = px(cx - arcRx * Math.cos(theta)), y = hor - ry * Math.sin(theta);
     var idx = phaseAt(m, ti).index;
-    // Below the horizon, lift the disc toward white and ring it with a dotted
-    // rim so dark moons (Katamba, Xibar) stay legible on the night band.
-    var col = up ? MOON_COLOUR[m] : lighten(MOON_COLOUR[m], 0.45);
-    var below = up ? "" :
-      '<circle r="' + (mr + 0.3).toFixed(2) + '" fill="none" stroke="' + lighten(MOON_COLOUR[m], 0.65) +
-      '" stroke-width="0.45" stroke-dasharray="1.1 0.9"/>';
-    out += '<g transform="translate(' + x.toFixed(2) + ' ' + y.toFixed(2) + ')" opacity="' + (up ? 1 : 0.9) + '">' +
-           moonDiscSVG(idx, mr, col) + below +
+    var col = MOON_COLOUR[m];
+    // Below the horizon, draw the moon in its true colour (same as the cards)
+    // and mark it as below with a dotted outline rather than dimming or tinting.
+    var rim = up ? "" :
+      '<circle r="' + (mr + 0.35).toFixed(2) + '" fill="none" stroke="' + lighten(col, 0.55) +
+      '" stroke-width="0.5" stroke-dasharray="1.1 0.9"/>';
+    out += '<g transform="translate(' + x.toFixed(2) + ' ' + y.toFixed(2) + ')">' +
+           moonDiscSVG(idx, mr, col) + rim +
            '<text x="0" y="' + (mr + 3.2) + '" text-anchor="middle" font-size="2.4" fill="' + col +
            '" stroke="rgba(255,255,255,0.85)" stroke-width="0.5" style="paint-order:stroke">' + c.label + '</text>' +
            '</g>';
@@ -469,7 +469,7 @@ function render() {
 
 document.getElementById("foot").innerHTML =
   'How this works, the model, and how to deploy: ' +
-  '<a href="https://moonwatch.dr.elanthia.online/README.md" style="color:var(--accent)">read the documentation</a>' +
+  '<a href="https://moonwatch.dr.elanthia.online/README.html" style="color:var(--accent)">read the documentation</a>' +
   ' &middot; ' +
   '<a href="https://discord.com/invite/f8ne99pVva" style="color:var(--accent)">Lich Discord</a>.';
 
