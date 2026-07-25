@@ -55,6 +55,8 @@
   .xib .name { color: var(--xibar); }
   .yav .name { color: var(--yavash); }
   .section-title { margin: 26px 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
+  .orient { display: inline-flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: normal; cursor: pointer; color: var(--dim); font-size: 12px; }
+  .orient input { accent-color: var(--accent); cursor: pointer; }
   .conj { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
   .conj .card { background: var(--panel); border: 1px solid #262b52; border-radius: 12px; padding: 14px 16px; }
   .conj .big { font-size: 20px; margin-top: 4px; }
@@ -73,7 +75,10 @@
     <div class="chip"><div class="k">Sun</div><div class="v" id="sun">-</div></div>
   </div>
 
-  <div class="section-title" style="margin-top:0">The sky now</div>
+  <div class="section-title" style="margin-top:0; display:flex; justify-content:space-between; align-items:center; gap:12px">
+    <span>The sky now</span>
+    <label class="orient"><input type="checkbox" id="facing-north" checked> facing north</label>
+  </div>
   <div class="sky">
     <svg viewBox="0 0 100 44" preserveAspectRatio="xMidYMid meet" role="img" aria-label="The moons and sun on their arcs across the horizon">
       <defs>
@@ -86,8 +91,8 @@
       <path d="M6 30 A44 24 0 0 1 94 30" fill="none" stroke="#3f6ea8" stroke-width="0.4" stroke-dasharray="1.4 1.6" opacity="0.6"/>
       <rect x="0" y="30" width="100" height="14" fill="#0b0d1e"/>
       <line x1="0" y1="30" x2="100" y2="30" stroke="#2f5a7a" stroke-width="0.5"/>
-      <text x="1.5" y="28.6" font-size="2.4" fill="#2b3a5c">E</text>
-      <text x="95.5" y="28.6" font-size="2.4" fill="#2b3a5c">W</text>
+      <text id="label-left" x="1.5" y="28.6" font-size="2.4" fill="#2b3a5c">W</text>
+      <text id="label-right" x="95.5" y="28.6" font-size="2.4" fill="#2b3a5c">E</text>
       <g id="sky-bodies"></g>
     </svg>
   </div>
@@ -277,6 +282,17 @@ function darken(hex, f) {
   return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
 }
 
+// Blend a #rrggbb colour toward white (f in 0..1) to lift low-contrast moons
+// (e.g. Xibar's deep blue) out of the dark below-horizon band.
+function lighten(hex, f) {
+  var n = parseInt(hex.slice(1), 16);
+  var r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  r = Math.round(r + (255 - r) * f);
+  g = Math.round(g + (255 - g) * f);
+  b = Math.round(b + (255 - b) * f);
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
 var FRAC = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.5, 0.25];
 function discStyle(idx, color) {
   var dark = darken(color, 0.4), light = color;
@@ -321,6 +337,14 @@ function renderSky(now) {
   var cx = 50, hor = 30, arcRx = 44, ryUp = 24, ryDn = 8, mr = 3, sr = 3.2;
   var ti = Math.floor(now), out = "";
 
+  // Orientation: facing north puts east on the right (bodies travel right to
+  // left); facing south is the mirror image. The arc math is unchanged - we
+  // just reflect the x coordinate around the meridian and swap the E/W labels.
+  var faceNorth = document.getElementById("facing-north").checked;
+  function px(x) { return faceNorth ? (2 * cx - x) : x; }
+  document.getElementById("label-left").textContent = faceNorth ? "W" : "E";
+  document.getElementById("label-right").textContent = faceNorth ? "E" : "W";
+
   var d = calcDate(ti), st = sunTimes(d.doy);
   var sunUp = d.sid >= st.rise && d.sid < st.set, sTheta, sRy;
   if (sunUp) {
@@ -330,19 +354,25 @@ function renderSky(now) {
     var el = d.sid >= st.set ? d.sid - st.set : d.sid + (SEC_DAY - st.set);
     sTheta = Math.PI + (el / nightLen) * Math.PI; sRy = ryDn;
   }
-  out += '<g transform="translate(' + (cx - arcRx * Math.cos(sTheta)).toFixed(2) + ' ' +
-         (hor - sRy * Math.sin(sTheta)).toFixed(2) + ')" opacity="' + (sunUp ? 1 : 0.3) + '">' +
+  out += '<g transform="translate(' + px(cx - arcRx * Math.cos(sTheta)).toFixed(2) + ' ' +
+         (hor - sRy * Math.sin(sTheta)).toFixed(2) + ')" opacity="' + (sunUp ? 1 : 0.5) + '">' +
          sunDiscSVG(sr) + '</g>';
 
   MOON_ORDER.forEach(function (m) {
     var c = MOONS[m], pos = imod(now - c.epoch, c.cycle), up = pos < c.visible, theta, ry;
     if (up) { theta = (pos / c.visible) * Math.PI; ry = ryUp; }
     else { theta = Math.PI + ((pos - c.visible) / (c.cycle - c.visible)) * Math.PI; ry = ryDn; }
-    var x = cx - arcRx * Math.cos(theta), y = hor - ry * Math.sin(theta);
+    var x = px(cx - arcRx * Math.cos(theta)), y = hor - ry * Math.sin(theta);
     var idx = phaseAt(m, ti).index;
-    out += '<g transform="translate(' + x.toFixed(2) + ' ' + y.toFixed(2) + ')" opacity="' + (up ? 1 : 0.4) + '">' +
-           moonDiscSVG(idx, mr, MOON_COLOUR[m]) +
-           '<text x="0" y="' + (mr + 3.2) + '" text-anchor="middle" font-size="2.4" fill="' + MOON_COLOUR[m] +
+    // Below the horizon, lift the disc toward white and ring it with a dotted
+    // rim so dark moons (Katamba, Xibar) stay legible on the night band.
+    var col = up ? MOON_COLOUR[m] : lighten(MOON_COLOUR[m], 0.45);
+    var below = up ? "" :
+      '<circle r="' + (mr + 0.3).toFixed(2) + '" fill="none" stroke="' + lighten(MOON_COLOUR[m], 0.65) +
+      '" stroke-width="0.45" stroke-dasharray="1.1 0.9"/>';
+    out += '<g transform="translate(' + x.toFixed(2) + ' ' + y.toFixed(2) + ')" opacity="' + (up ? 1 : 0.9) + '">' +
+           moonDiscSVG(idx, mr, col) + below +
+           '<text x="0" y="' + (mr + 3.2) + '" text-anchor="middle" font-size="2.4" fill="' + col +
            '" stroke="rgba(255,255,255,0.85)" stroke-width="0.5" style="paint-order:stroke">' + c.label + '</text>' +
            '</g>';
   });
@@ -438,14 +468,15 @@ function render() {
 }
 
 document.getElementById("foot").innerHTML =
-  "Deterministic from the Elanthian clock: moon periods are the game developers' sidereal orbits " +
-  "(cross-validated to under a second), phases and sun times from validated tables. " +
-  "Everything is computed in your browser - no server, no network, no tracking. " +
-  "Phase is a model value (no per-character calibration); timers are quantized to the 60s server tick.";
+  'How this works, the model, and how to deploy: ' +
+  '<a href="https://moonwatch.dr.elanthia.online/README.md" style="color:var(--accent)">read the documentation</a>' +
+  ' &middot; ' +
+  '<a href="https://discord.com/invite/f8ne99pVva" style="color:var(--accent)">Lich Discord</a>.';
 
 buildMoonCards();
 render();
 setInterval(render, 1000);
+document.getElementById("facing-north").addEventListener("change", render);
 </script>
 </body>
 </html>
