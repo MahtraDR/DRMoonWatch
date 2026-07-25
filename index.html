@@ -333,6 +333,12 @@ function sunDiscSVG(r) {
 
 // Place the sun and each moon on the sky arc by how far through its cycle it is:
 // theta 0..PI climbs east->zenith->west above the horizon; PI..2PI dips below.
+// Ease the position along each arc (smoothstep). Bodies linger near the horizon
+// around rise/set and sweep quickly through the zenith/nadir, so a body that is
+// (say) rising soon sits close to its horizon corner instead of mid-arc, which
+// a linear time-to-angle mapping gets wrong on a steep sine arc.
+function arcEase(f) { f = Math.max(0, Math.min(1, f)); return f * f * (3 - 2 * f); }
+
 function renderSky(now) {
   var cx = 50, hor = 30, arcRx = 44, ryUp = 24, ryDn = 8, mr = 3, sr = 3.2;
   var ti = Math.floor(now), out = "";
@@ -348,11 +354,11 @@ function renderSky(now) {
   var d = calcDate(ti), st = sunTimes(d.doy);
   var sunUp = d.sid >= st.rise && d.sid < st.set, sTheta, sRy;
   if (sunUp) {
-    sTheta = ((d.sid - st.rise) / (st.set - st.rise)) * Math.PI; sRy = ryUp;
+    sTheta = arcEase((d.sid - st.rise) / (st.set - st.rise)) * Math.PI; sRy = ryUp;
   } else {
     var nightLen = SEC_DAY - (st.set - st.rise);
     var el = d.sid >= st.set ? d.sid - st.set : d.sid + (SEC_DAY - st.set);
-    sTheta = Math.PI + (el / nightLen) * Math.PI; sRy = ryDn;
+    sTheta = Math.PI + arcEase(el / nightLen) * Math.PI; sRy = ryDn;
   }
   out += '<g transform="translate(' + px(cx - arcRx * Math.cos(sTheta)).toFixed(2) + ' ' +
          (hor - sRy * Math.sin(sTheta)).toFixed(2) + ')" opacity="' + (sunUp ? 1 : 0.5) + '">' +
@@ -360,8 +366,8 @@ function renderSky(now) {
 
   MOON_ORDER.forEach(function (m) {
     var c = MOONS[m], pos = imod(now - c.epoch, c.cycle), up = pos < c.visible, theta, ry;
-    if (up) { theta = (pos / c.visible) * Math.PI; ry = ryUp; }
-    else { theta = Math.PI + ((pos - c.visible) / (c.cycle - c.visible)) * Math.PI; ry = ryDn; }
+    if (up) { theta = arcEase(pos / c.visible) * Math.PI; ry = ryUp; }
+    else { theta = Math.PI + arcEase((pos - c.visible) / (c.cycle - c.visible)) * Math.PI; ry = ryDn; }
     var x = px(cx - arcRx * Math.cos(theta)), y = hor - ry * Math.sin(theta);
     var idx = phaseAt(m, ti).index;
     var col = MOON_COLOUR[m];
