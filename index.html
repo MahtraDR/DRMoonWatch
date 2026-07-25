@@ -213,7 +213,16 @@ function moonPos(m, t) {
   return { visible: false, seconds: Math.max(rise - t, 0), event: "rise" };
 }
 
-function upAt(m, t) { var c = MOONS[m]; return imod(t - c.epoch, c.cycle) < c.visible; }
+// Up-test against the same 60s-tick-quantized rise/set instants that moonPos
+// reports, so conjunction windows reconcile with the per-moon countdowns.
+// Rounding can nudge a boundary across a cycle edge, so check adjacent cycles.
+function upAtQ(m, t) {
+  var c = MOONS[m], n = Math.floor((t - c.epoch) / c.cycle);
+  for (var k = n - 1; k <= n + 1; k++) {
+    if (t >= nearestTick(c.epoch + k * c.cycle) && t < nearestTick(c.epoch + k * c.cycle + c.visible)) return true;
+  }
+  return false;
+}
 
 function phaseAt(m, t) {
   var P = MOONS[m].sidereal, um = Math.floor(t / 60);
@@ -238,22 +247,37 @@ function nextPhaseIndexTime(m, t, target, horizonDays) {
   return null;
 }
 
+// Event-driven over the exact quantized rise/set instants (the same ones the
+// per-moon rows show), so a window's start/end line up to the second with those
+// countdowns. A coarse minute-step scan drifted by up to a tick and disagreed
+// (e.g. "all above" reading a minute later than the last moon's own rise).
 function conjunction(t, wantUp, horizonDays) {
-  var H = (horizonDays || 30) * 24 * 60;
+  var limit = t + (horizonDays || 30) * 86400;
+  var bounds = [t];
+  for (var k = 0; k < MOON_ORDER.length; k++) {
+    var c = MOONS[MOON_ORDER[k]], n = Math.floor((t - c.epoch) / c.cycle) - 1;
+    while (true) {
+      var rise = nearestTick(c.epoch + n * c.cycle);
+      if (rise > limit) break;
+      bounds.push(rise, nearestTick(c.epoch + n * c.cycle + c.visible));
+      n++;
+    }
+  }
+  bounds = bounds.filter(function (b) { return b >= t && b <= limit; })
+                 .sort(function (a, b) { return a - b; });
   function cond(tt) {
     for (var k = 0; k < MOON_ORDER.length; k++) {
-      var u = upAt(MOON_ORDER[k], tt);
-      if (wantUp && !u) return false;
-      if (!wantUp && u) return false;
+      if (upAtQ(MOON_ORDER[k], tt) !== wantUp) return false;
     }
     return true;
   }
-  for (var i = 0; i < H; i++) {
-    var tt = t + i * 60;
-    if (cond(tt)) {
-      var j = i;
-      while (j < H && cond(t + j * 60)) j++;
-      return { start: t + i * 60, end: t + j * 60 };
+  for (var i = 0; i < bounds.length; i++) {
+    if (cond(bounds[i])) {
+      var end = limit;
+      for (var j = i + 1; j < bounds.length; j++) {
+        if (!cond(bounds[j])) { end = bounds[j]; break; }
+      }
+      return { start: bounds[i], end: end };
     }
   }
   return null;
