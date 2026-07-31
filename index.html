@@ -9,7 +9,9 @@
     --bg: #0b0d1a; --panel: #151830; --panel2: #1d2142;
     --ink: #e9e9f2; --dim: #9aa0c0; --accent: #b9a6ff;
     --up: #7ee0a5; --down: #5a6088;
-    --katamba: #cbb6ff; --xibar: #9fc4e8; --yavash: #f0917f;
+    /* Moon name hues echo each moon's sky atmosphere (Katamba violet, Xibar
+       ice-blue, Yavash crimson) so the cards and the scene agree. */
+    --katamba: #b49ae0; --xibar: #8fc7f0; --yavash: #ff8496;
   }
   * { box-sizing: border-box; }
   body {
@@ -51,11 +53,10 @@
     background: linear-gradient(180deg, var(--panel2), var(--panel));
     border: 1px solid #2a2f5a; border-radius: 16px; padding: 18px; display: flex; gap: 16px;
   }
-  .disc {
-    width: 64px; height: 64px; border-radius: 50%; flex: 0 0 64px;
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,.22), 0 0 18px rgba(120,110,180,.25);
-    align-self: center;
-  }
+  /* The card disc now holds a small SVG moon rendered with the SAME lore
+     colours + phase shape + glow as the sky scene (see moonCardSVG). */
+  .disc { width: 64px; height: 64px; flex: 0 0 64px; align-self: center; display: flex; }
+  .disc svg { width: 100%; height: 100%; display: block; overflow: visible; }
   .moon .name { font-size: 18px; font-weight: 600; }
   .moon .phase { color: var(--accent); margin: 2px 0 8px; }
   .moon .row { display: flex; justify-content: space-between; font-size: 13px; padding: 2px 0; }
@@ -217,11 +218,21 @@
   }
   .moons-label-cardinal { fill: #2b3a5c; font-size: 11px; opacity: 0.9; }
 
+  /* Card moon disc: a gentle idle breathing of the sky-hue glow so the cards
+     feel as alive as the scene (opacity comes from the phase; only scale pulses,
+     so the illum-scaled glow is preserved). Phase-anchored per render like the
+     scene animations. */
+  .moons-card-glow {
+    transform-box: fill-box; transform-origin: center;
+    animation: moons-card-pulse 6s ease-in-out infinite;
+  }
+  @keyframes moons-card-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+
   /* Accessibility: respect the OS reduced-motion setting (maps Lichborne's
      epilepsy-safe gate). The render also skips motion FX when this is set. */
   @media (prefers-reduced-motion: reduce) {
     .moons-star, .moons-shooting, .moons-firefly, .moons-leaf,
-    .moons-ring-rise, .moons-ring-set, .moons-ray--anim { animation: none !important; }
+    .moons-ring-rise, .moons-ring-set, .moons-ray--anim, .moons-card-glow { animation: none !important; }
     .moons-layer { transition: none; }
     .sky { transition: none; }
   }
@@ -449,40 +460,6 @@ function fmt(sec) {
   return o;
 }
 function pad2(n) { return (n < 10 ? "0" : "") + n; }
-
-// Multiply a #rrggbb colour toward black (f in 0..1) for the shadowed lunar side.
-function darken(hex, f) {
-  var n = parseInt(hex.slice(1), 16);
-  var r = Math.round(((n >> 16) & 255) * f);
-  var g = Math.round(((n >> 8) & 255) * f);
-  var b = Math.round((n & 255) * f);
-  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
-}
-
-// Blend a #rrggbb colour toward white (f in 0..1) to lift low-contrast moons
-// (e.g. Xibar's deep blue) out of the dark below-horizon band.
-function lighten(hex, f) {
-  var n = parseInt(hex.slice(1), 16);
-  var r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  r = Math.round(r + (255 - r) * f);
-  g = Math.round(g + (255 - g) * f);
-  b = Math.round(b + (255 - b) * f);
-  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
-}
-
-var FRAC = [0, 0.25, 0.5, 0.75, 1, 0.75, 0.5, 0.25];
-function discStyle(idx, color) {
-  var dark = darken(color, 0.4), light = color;
-  if (idx === 0) return dark;
-  if (idx === 4) return light;
-  var pct = Math.round((1 - FRAC[idx]) * 100);
-  var dir = (idx >= 1 && idx <= 3) ? "to right" : "to left"; // waxing lit on right
-  return "linear-gradient(" + dir + ", " + dark + " " + pct + "%, " + light + " " + pct + "%)";
-}
-
-// ---- Sky scene -------------------------------------------------------------
-// True moon colours: Katamba the black moon, Xibar the blue, Yavash the red.
-var MOON_COLOUR = { katamba: "#252525", xibar: "#0F52BA", yavash: "#B22222" };
 
 // ============================================================================
 // Sky scene - ported (with permission) from Lichborne by Sekmeht and Binu
@@ -929,6 +906,41 @@ function moonDiscGroup(u, M, anim, t, NEAR) {
   return out + "</g>";
 }
 
+// Base disc gradient stops per moon (the same lore surfaces the sky uses, so the
+// cards and the scene read as the same three bodies).
+var MOON_DISC_STOPS = {
+  katamba: ["#332d3a", "#16121c", "#0b0910"],
+  yavash:  ["#ef3d4e", "#a81c2e", "#4e0c16"],
+  xibar:   ["#6fb8f7", "#2f79dd", "#17509e"]
+};
+// A card-sized moon disc drawn with the SAME technique as the sky moons: the
+// lore radial-gradient surface, a soft-terminator phase lune (waxing lit right,
+// waning left - the calendar convention, matching the card face), earthshine +
+// locate-me rim near new, the atmosphere outline, and a soft sky-hue glow that
+// gently breathes. Static hues (no sun-direction) since a card has no sky context.
+function moonCardSVG(m, ph, t) {
+  var s = MOON_STYLE[m], st = MOON_DISC_STOPS[m], R = 18, illum = ph.illum, waxing = ph.waxing;
+  var glowR = Math.min(R * (s.glowR || 1.85), 30), gs = s.glowStrength || 1;
+  var glowOp = m === "katamba" ? 0.7 : clamp01(0.15 + 1.1 * Math.pow(illum, 1.3));
+  var o = '<svg class="moons-card-svg" viewBox="-32 -32 64 64" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><defs>';
+  o += '<radialGradient id="cardmoon-' + m + '" cx="35%" cy="35%" r="75%"><stop offset="0%" stop-color="' + st[0] + '"/><stop offset="60%" stop-color="' + st[1] + '"/><stop offset="100%" stop-color="' + st[2] + '"/></radialGradient>';
+  o += '<radialGradient id="cardglow-' + m + '" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="' + s.glow + '" stop-opacity="' + (0.55 * gs) + '"/><stop offset="55%" stop-color="' + s.glow + '" stop-opacity="' + (0.22 * gs) + '"/><stop offset="100%" stop-color="' + s.glow + '" stop-opacity="0"/></radialGradient>';
+  var phasing = illum < 0.995, maskAttr = "";
+  if (phasing) {
+    o += '<filter id="cardsoft-' + m + '" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="' + Math.max(0.6, R * 0.16) + '"/></filter>';
+    o += '<mask id="cardlit-' + m + '" maskUnits="userSpaceOnUse" x="' + (-R - 3) + '" y="' + (-R - 3) + '" width="' + (2 * R + 6) + '" height="' + (2 * R + 6) + '"><g transform="' + (waxing ? "" : "scale(-1,1)") + '"><path d="' + litPath(R, 1 - 2 * illum) + '" fill="#fff" filter="url(#cardsoft-' + m + ')"/></g></mask>';
+    maskAttr = ' mask="url(#cardlit-' + m + ')"';
+  }
+  o += '</defs>';
+  o += '<g class="moons-card-glow" style="animation-delay:' + aDelay(t, 6, MOON_DEPTH[m] * 2) + 's"><circle cx="0" cy="0" r="' + glowR + '" fill="url(#cardglow-' + m + ')" opacity="' + glowOp + '"/></g>';
+  if (illum < 0.9 && m !== "katamba") o += '<circle cx="0" cy="0" r="' + R + '" fill="' + s.tones.shadow + '" opacity="' + (0.30 * (1 - illum)) + '"/>';
+  if (illum < 0.9) o += '<circle cx="0" cy="0" r="' + R + '" fill="none" stroke="' + s.rim + '" stroke-width="0.75" opacity="' + (0.3 * (1 - illum) * (0.45 + 0.55 * s.atmo)) + '"/>';
+  o += "<g" + maskAttr + '><circle cx="0" cy="0" r="' + R + '" fill="url(#cardmoon-' + m + ')" stroke="' + (s.atmo > 0 ? s.rim : "none") + '" stroke-width="' + (0.7 + 0.9 * s.atmo) + '" stroke-opacity="' + (0.45 + 0.55 * s.atmo) + '"/>';
+  if (m !== "katamba" && illum > 0.55) o += '<circle cx="0" cy="0" r="' + R + '" fill="' + s.tones.lit + '" opacity="' + (0.3 * ((illum - 0.55) / 0.45)) + '"/>';
+  o += "</g></svg>";
+  return o;
+}
+
 // Build and inject the whole scene. Rebuilt each tick (see aDelay for why
 // animations survive that); the persistent backdrop layer divs only change
 // opacity so their CSS transitions stay smooth.
@@ -1176,7 +1188,9 @@ function render() {
     var pos = moonPos(m, now);
     var ph = phaseAt(m, ti);
     var np = nextPhase(m, ti);
-    document.getElementById("disc-" + m).style.background = discStyle(ph.index, MOON_COLOUR[m]);
+    var illumC = (1 - Math.cos(ph.angle * Math.PI / 180)) / 2;
+    document.getElementById("disc-" + m).innerHTML =
+      moonCardSVG(m, { illum: illumC, waxing: ph.angle < 180 }, now);
     document.getElementById("phase-" + m).textContent = ph.name;
     var hz = document.getElementById("horizon-" + m);
     hz.textContent = pos.visible ? "above" : "below";
