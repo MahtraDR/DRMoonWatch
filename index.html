@@ -23,10 +23,10 @@
     min-height: 100vh; padding: 24px;
   }
   .wrap { max-width: 960px; margin: 0 auto; }
-  h1 { font-weight: 600; font-size: 26px; margin: 0 0 4px; letter-spacing: .5px; }
+  h1 { font-weight: 600; font-size: 26px; margin: 0 0 20px; letter-spacing: .5px; text-align: center; }
   .sub { color: var(--dim); margin-bottom: 20px; font-size: 13px; }
   .bar {
-    display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 22px;
+    display: flex; flex-wrap: wrap; gap: 14px; margin-top: 22px; margin-bottom: 22px;
   }
   .chip {
     background: var(--panel); border: 1px solid #262b52; border-radius: 12px;
@@ -69,7 +69,7 @@
   .section-title { margin: 26px 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
   .orient { display: inline-flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: normal; cursor: pointer; color: var(--dim); font-size: 12px; }
   .orient input { accent-color: var(--accent); cursor: pointer; }
-  .conj { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .conj { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 22px; }
   .conj .card { background: var(--panel); border: 1px solid #262b52; border-radius: 12px; padding: 14px 16px; }
   .conj .big { font-size: 20px; margin-top: 4px; }
   .foot { margin-top: 30px; color: var(--dim); font-size: 12px; line-height: 1.6; border-top: 1px solid #222750; padding-top: 14px; }
@@ -133,6 +133,18 @@
     stroke-width: 1.5; stroke-dasharray: 0.5 5.5; stroke-linecap: round; opacity: 0.62;
   }
   .moons-horizon { stroke: currentColor; stroke-width: 1; opacity: 0.45; }
+
+  /* Below-horizon schematic: a dashed arc dipping under the horizon that carries
+     the down-moons as ghosted, dashed-rim discs with labels - echoes the
+     pre-Lichborne view so moons that have set still read as travelling out of
+     sight. currentColor is the scene ink, so the guide stays legible on any sky
+     or ground; the moon discs/labels are dimmed to read as "beneath". */
+  .moons-underarc {
+    stroke: currentColor; stroke-width: 1; opacity: 0.4;
+    stroke-dasharray: 5 5; stroke-linecap: round;
+  }
+  .moons-underbody { opacity: 0.55; }
+  .moons-underlabel { opacity: 0.85; }
 
   /* Horizon silhouette - near-black fixed hue (a landscape in shadow reads
      against every sky state). Drawn after the bodies + the opaque ground, so a
@@ -241,18 +253,7 @@
 <body>
 <div class="wrap">
   <h1>Elanthian Moons</h1>
-  <div class="sub">Katamba, Xibar and Yavash - computed live in your browser from the wall clock. No server, offline-capable.</div>
 
-  <div class="bar">
-    <div class="chip"><div class="k">Elanthian date</div><div class="v" id="cal-date">-</div></div>
-    <div class="chip"><div class="k">Hour / season</div><div class="v" id="cal-hour">-</div></div>
-    <div class="chip"><div class="k">Sun</div><div class="v" id="sun">-</div></div>
-  </div>
-
-  <div class="section-title" style="margin-top:0; display:flex; justify-content:space-between; align-items:center; gap:12px">
-    <span>The sky now</span>
-    <label class="orient"><input type="checkbox" id="facing-north" checked> facing north</label>
-  </div>
   <div class="sky" id="scene">
     <div class="moons-layer moons-layer--night"></div>
     <div class="moons-layer moons-layer--day" id="layer-day"></div>
@@ -263,10 +264,15 @@
 
   <div class="moons" id="moons"></div>
 
-  <div class="section-title">Conjunctions</div>
   <div class="conj">
     <div class="card"><div class="k" style="color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.08em">All three above the horizon</div><div class="big" id="allup">-</div></div>
     <div class="card"><div class="k" style="color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.08em">All three below the horizon</div><div class="big" id="alldown">-</div></div>
+  </div>
+
+  <div class="bar">
+    <div class="chip"><div class="k">Elanthian date</div><div class="v" id="cal-date">-</div></div>
+    <div class="chip"><div class="k">Hour / season</div><div class="v" id="cal-hour">-</div></div>
+    <div class="chip"><div class="k">Sun</div><div class="v" id="sun">-</div></div>
   </div>
 
   <div class="foot" id="foot"></div>
@@ -694,7 +700,12 @@ function skyModel(now, W) {
     } else {
       var downMin = Math.round((c.cycle - c.visible) / 60);
       var remMin = Math.round(moonPos(m, now).seconds / 60);
-      downBodies.push({ k: m, s: s, rem: remMin, crest: crestPos(downMin, remMin, s.r) });
+      // Ride the below-horizon return arc: progress 0 (just set, west) -> 1
+      // (about to rise, east). Eased like the sky arc so the ends meet the sky
+      // bodies exactly at the horizon corners on rise/set.
+      var progD = downMin > 0 ? clamp01((downMin - remMin) / downMin) : 0;
+      var pd = underPos(arcEase(progD), CX, ARC_RX);
+      downBodies.push({ k: m, s: s, progress: progD, x: pd.x, y: pd.y, rem: remMin });
     }
   }
 
@@ -961,7 +972,7 @@ function renderScene(now) {
   // Orientation: Lichborne draws north-facing (rise at RIGHT) = moondash
   // facing-north. Facing south mirrors the whole world group; upright labels are
   // positioned with PX() so text stays readable.
-  var faceNorth = document.getElementById("facing-north").checked;
+  var faceNorth = true;
   function PX(x) { return faceNorth ? x : (W - x); }
   var worldOpen = faceNorth ? "<g>" : '<g transform="translate(' + W + ',0) scale(-1,1)">';
 
@@ -988,6 +999,7 @@ function renderScene(now) {
   M.upLit.forEach(function (u) { o += '<circle cx="' + u.b.x + '" cy="' + u.b.y + '" r="' + u.b.s.r + '" fill="#000"/>'; });
   o += '</mask>';
   o += '<mask id="lb-arcfade" maskUnits="userSpaceOnUse" x="' + (CX - ARC_RX) + '" y="0" width="' + (ARC_RX * 2) + '" height="' + (HY + 2) + '"><linearGradient id="lb-arcfadeg" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#000"/><stop offset="13%" stop-color="#fff"/><stop offset="87%" stop-color="#fff"/><stop offset="100%" stop-color="#000"/></linearGradient><rect x="' + (CX - ARC_RX) + '" y="0" width="' + (ARC_RX * 2) + '" height="' + (HY + 2) + '" fill="url(#lb-arcfadeg)"/></mask>';
+  o += '<mask id="lb-underfade" maskUnits="userSpaceOnUse" x="' + (CX - ARC_RX) + '" y="' + HY + '" width="' + (ARC_RX * 2) + '" height="' + (SC.UNDER_DEPTH + 2) + '"><rect x="' + (CX - ARC_RX) + '" y="' + HY + '" width="' + (ARC_RX * 2) + '" height="' + (SC.UNDER_DEPTH + 2) + '" fill="url(#lb-arcfadeg)"/></mask>';
   if (M.sunGlow) o += '<radialGradient id="lb-sunglow" gradientUnits="userSpaceOnUse" cx="' + M.sunGlow.x + '" cy="' + M.sunGlow.y + '" r="' + M.sunGlow.radius + '"><stop offset="0%" stop-color="' + M.sunGlow.color + '" stop-opacity="' + M.sunGlow.opacity + '"/><stop offset="50%" stop-color="' + M.sunGlow.color + '" stop-opacity="' + (M.sunGlow.opacity * 0.45) + '"/><stop offset="100%" stop-color="' + M.sunGlow.color + '" stop-opacity="0"/></radialGradient>';
   var ground = groundColors(M);
   o += '<linearGradient id="lb-ground" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="' + ground.top + '"/><stop offset="100%" stop-color="' + ground.bot + '"/></linearGradient>';
@@ -1037,14 +1049,6 @@ function renderScene(now) {
     var deg = Math.atan2(c.b.y - c.a.y, c.b.x - c.a.x) * 180 / Math.PI;
     o += '<ellipse cx="' + mx + '" cy="' + my + '" rx="' + span + '" ry="' + (Math.max(c.a.s.r, c.b.s.r) + 5) + '" transform="rotate(' + deg + ' ' + mx + ' ' + my + ')" fill="none" stroke="#dbe9f5" stroke-width="1" opacity="0.22"/>';
   });
-  M.downBodies.slice().sort(function (a, b) { return MOON_DEPTH[a.k] - MOON_DEPTH[b.k]; }).forEach(function (b) {
-    if (!b.crest) return;
-    o += "<g><title>" + MOON_LORE[b.k] + "\n\n" + (b.rem <= 0 ? "Rising any moment" : "Rises in " + b.rem + "m") + "</title>";
-    o += '<circle cx="' + b.crest.x + '" cy="' + b.crest.y + '" r="' + b.s.r + '" fill="url(#lb-moon-' + b.k + ')" stroke="' + (b.s.atmo > 0 ? b.s.rim : "none") + '" stroke-width="' + (0.7 + 0.9 * b.s.atmo) + '" stroke-opacity="' + (0.45 + 0.55 * b.s.atmo) + '"/>';
-    if (anim) o += rings(b.crest.x, b.crest.y, b.s.r + 4, b.s.rim, b.crest.kind, t);
-    o += "</g>";
-  });
-
   o += '<rect x="0" y="' + HY + '" width="' + W + '" height="' + (H - HY) + '" fill="url(#lb-ground)"/>';
   if (M.groundLight) o += '<g opacity="' + M.groundLight.low + '" aria-hidden="true"><rect x="0" y="' + HY + '" width="' + W + '" height="' + (H - HY) + '" fill="url(#lb-gpool)"/></g>';
 
@@ -1088,6 +1092,20 @@ function renderScene(now) {
     LEAVES.forEach(function (l) { o += '<ellipse class="moons-leaf" cx="' + (l.x * W) + '" cy="' + (HY - 8) + '" rx="' + (l.r * 1.35) + '" ry="' + (l.r * 0.65) + '" fill="' + mixHex(l.c, "#2e2015", M.landNight) + '" style="animation-duration:' + l.dur + "s;animation-delay:" + aDelay(t, l.dur, l.delay) + "s;--fall:" + (H - HY + 14) + "px;--sway:" + l.sway + 'px"/>'; });
     o += '</g>';
   }
+  // Below-horizon schematic (drawn over the landscape so it stays visible): a
+  // dashed arc dipping under the horizon that carries the down-moons as ghosted,
+  // dashed-rim discs. Echoes the pre-Lichborne view - moons that have set keep
+  // travelling out of sight until they rise again. The arc meets the sky arc
+  // exactly at the horizon corners, so rise/set stays continuous.
+  var underD = "M " + (CX - ARC_RX) + " " + HY + " A " + ARC_RX + " " + SC.UNDER_DEPTH + " 0 0 0 " + (CX + ARC_RX) + " " + HY;
+  o += '<g mask="url(#lb-underfade)"><path d="' + underD + '" class="moons-underarc" fill="none"/></g>';
+  M.downBodies.slice().sort(function (a, b) { return MOON_DEPTH[a.k] - MOON_DEPTH[b.k]; }).forEach(function (b) {
+    o += '<g class="moons-underbody"><title>' + MOON_LORE[b.k] + "\n\n" + (b.rem <= 0 ? "Rising any moment" : "Rises in " + b.rem + "m") + "</title>";
+    o += '<circle cx="' + b.x + '" cy="' + b.y + '" r="' + b.s.r + '" fill="url(#lb-moon-' + b.k + ')"/>';
+    o += '<circle cx="' + b.x + '" cy="' + b.y + '" r="' + (b.s.r + 0.8) + '" fill="none" stroke="' + b.s.rim + '" stroke-width="0.7" stroke-dasharray="1.8 1.6"/>';
+    o += "</g>";
+  });
+
   o += "</g>";   // end world group
 
   // Labels (upright; positioned with PX so they read on either facing).
@@ -1118,6 +1136,11 @@ function renderScene(now) {
     var bx = PX(b.x), tt = b.rem <= 0 ? "setting..." : "sets in " + b.rem + "m";
     o += '<text x="' + bx + '" y="' + (b.y - b.s.r - 6) + '" class="moons-name" text-anchor="middle">' + b.s.label + '</text>';
     o += '<text x="' + bx + '" y="' + placeChip(bx, b.y + b.s.r + 12, tt, b.y, b.s.r) + '" class="moons-chip" text-anchor="middle">' + tt + '</text>';
+  });
+  M.downBodies.forEach(function (b) {
+    var bx = PX(b.x), tt = b.rem <= 0 ? "rising..." : "rises in " + b.rem + "m";
+    o += '<g class="moons-underlabel"><text x="' + bx + '" y="' + (b.y - b.s.r - 5) + '" class="moons-name" text-anchor="middle">' + b.s.label + '</text>';
+    o += '<text x="' + bx + '" y="' + placeChip(bx, b.y + b.s.r + 11, tt, b.y, b.s.r) + '" class="moons-chip" text-anchor="middle">' + tt + '</text></g>';
   });
 
   svg.setAttribute("viewBox", "0 0 " + W + " " + H);
@@ -1215,6 +1238,8 @@ function render() {
 }
 
 document.getElementById("foot").innerHTML =
+  'Katamba, Xibar and Yavash - computed live in your browser from the wall clock. No server, offline-capable.' +
+  '<br>' +
   'How this works, the model, and how to deploy: ' +
   '<a href="https://moonwatch.dr.elanthia.online/README.html" style="color:var(--accent)">read the documentation</a>.' +
   '<br>' +
@@ -1227,7 +1252,6 @@ document.getElementById("foot").innerHTML =
 buildMoonCards();
 render();
 setInterval(render, 1000);
-document.getElementById("facing-north").addEventListener("change", render);
 // Re-render when the OS reduced-motion preference changes so the scene's motion
 // gating (and the belt-and-suspenders CSS) take effect immediately.
 if (window.matchMedia) {
