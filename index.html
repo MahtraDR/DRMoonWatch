@@ -978,6 +978,11 @@ function renderScene(now) {
   document.getElementById("layer-twilight").style.opacity = M.wTwi;
   scene.style.color = M.sceneInk.color;
   scene.style.setProperty("--moons-halo", M.sceneInk.halo);
+  // Size on-scene text as a fraction of the viewBox width so labels keep the
+  // same proportion of the scene at any width (0.016 * 750 = 12, the original
+  // desktop size). Capped at 12 so wide layouts are unchanged; only the
+  // narrower mobile viewBox shrinks it, which stops the labels from crowding.
+  scene.style.setProperty("--game-font-size", Math.min(12, Math.max(7, W * 0.016)).toFixed(2) + "px");
 
   // Orientation: Lichborne draws north-facing (rise at RIGHT) = moondash
   // facing-north. Facing south mirrors the whole world group; upright labels are
