@@ -69,6 +69,15 @@
   .section-title { margin: 26px 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
   .orient { display: inline-flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: normal; cursor: pointer; color: var(--dim); font-size: 12px; }
   .orient input { accent-color: var(--accent); cursor: pointer; }
+  /* Orientation toggle floated over the scene's top-right corner - absolutely
+     positioned so it overlays the image and shifts no other element. A subtle
+     pill keeps it legible against any day/night sky. */
+  .sky-orient {
+    position: absolute; top: 8px; right: 10px; z-index: 2;
+    background: rgba(11, 13, 26, 0.55); border: 1px solid #262b52;
+    border-radius: 999px; padding: 4px 10px; color: var(--ink);
+    -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+  }
   .conj { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 22px; }
   .conj .card { background: var(--panel); border: 1px solid #262b52; border-radius: 12px; padding: 14px 16px; }
   .conj .big { font-size: 20px; margin-top: 4px; }
@@ -260,6 +269,7 @@
     <div class="moons-layer moons-layer--zenith" id="layer-zenith"></div>
     <div class="moons-layer moons-layer--twilight" id="layer-twilight"></div>
     <svg class="moons-svg" id="scene-svg" role="img" aria-label="The moons and sun on their arcs across Elanthia's sky"></svg>
+    <label class="orient sky-orient"><input type="checkbox" id="facing-north" checked> <span id="facing-label">Facing North</span></label>
   </div>
 
   <div class="moons" id="moons"></div>
@@ -972,7 +982,8 @@ function renderScene(now) {
   // Orientation: Lichborne draws north-facing (rise at RIGHT) = moondash
   // facing-north. Facing south mirrors the whole world group; upright labels are
   // positioned with PX() so text stays readable.
-  var faceNorth = true;
+  var faceNorth = document.getElementById("facing-north").checked;
+  document.getElementById("facing-label").textContent = faceNorth ? "Facing North" : "Facing South";
   function PX(x) { return faceNorth ? x : (W - x); }
   var worldOpen = faceNorth ? "<g>" : '<g transform="translate(' + W + ',0) scale(-1,1)">';
 
@@ -1252,6 +1263,7 @@ document.getElementById("foot").innerHTML =
 buildMoonCards();
 render();
 setInterval(render, 1000);
+document.getElementById("facing-north").addEventListener("change", render);
 // Re-render when the OS reduced-motion preference changes so the scene's motion
 // gating (and the belt-and-suspenders CSS) take effect immediately.
 if (window.matchMedia) {
